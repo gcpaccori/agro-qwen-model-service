@@ -24,7 +24,7 @@ _MODEL_ERROR = None
 
 
 def load_model():
-    """Carga el modelo al inicio. Si falla, guarda el error."""
+    """Carga el modelo. Si falla, guarda el error."""
     global _LLM, _MODEL_ERROR
     
     print("=" * 60)
@@ -60,6 +60,11 @@ def load_model():
         return False
 
 
+# ⚠️ CARGAR MODELO AQUÍ (se ejecuta al importar el módulo, ANTES de gunicorn)
+print("🚀 Inicializando módulo model_api...")
+load_model()
+
+
 @app.get("/")
 def root():
     """Información del servicio"""
@@ -68,7 +73,8 @@ def root():
             "service": "Agricultural LLM API",
             "status": "error",
             "error": _MODEL_ERROR,
-            "model_loaded": False
+            "model_loaded": False,
+            "model_path": MODEL_PATH
         }), 500
     
     return jsonify({
@@ -91,7 +97,8 @@ def health():
         return jsonify({
             "status": "error",
             "error": _MODEL_ERROR,
-            "model_loaded": False
+            "model_loaded": False,
+            "model_path": MODEL_PATH
         }), 500
     
     return jsonify({
@@ -110,14 +117,16 @@ def chat():
     if _MODEL_ERROR:
         return jsonify({
             "error": "Model not available",
-            "details": _MODEL_ERROR
+            "details": _MODEL_ERROR,
+            "model_path": MODEL_PATH
         }), 503
     
     # Si no hay modelo cargado (no debería pasar)
     if _LLM is None:
         return jsonify({
             "error": "Model not loaded",
-            "details": "LLM instance is None"
+            "details": "LLM instance is None",
+            "model_path": MODEL_PATH
         }), 503
     
     try:
@@ -128,7 +137,7 @@ def chat():
         max_tokens = int(payload.get("max_tokens", 300))
         
         mensaje = context.get("mensaje", "")
-        print(f"📨 Request: {mensaje[:50]}...")
+        print(f"📨 Request: {mensaje[:100]}...")
         
         # Preparar mensajes
         messages = [
@@ -145,16 +154,20 @@ def chat():
         )
         
         content = response["choices"][0]["message"]["content"] or ""
-        print(f"✅ Respuesta generada: {len(content)} caracteres")
+        print(f"✅ Respuesta: {len(content)} chars")
         
         return jsonify({
             "content": content,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "model": "llama-cpp",
+            "tokens": len(content.split())
         })
         
     except Exception as e:
         error_msg = f"Error procesando request: {str(e)}"
         print(f"❌ {error_msg}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
             "error": error_msg,
             "type": type(e).__name__
@@ -162,20 +175,8 @@ def chat():
 
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print("🚀 INICIANDO SERVIDOR - Agricultural LLM API")
-    print("=" * 60)
-    
-    # PASO 1: Cargar modelo ANTES de levantar servidor
-    model_loaded = load_model()
-    
-    if not model_loaded:
-        print("⚠️  ADVERTENCIA: Servidor iniciará SIN modelo cargado")
-        print("⚠️  Todas las peticiones /chat fallarán con error 503")
-    
-    # PASO 2: Levantar servidor
+    # Este bloque SOLO se ejecuta si corres: python model_api.py
+    # NO se ejecuta con gunicorn
     port = int(os.getenv("PORT", 8080))
-    print(f"🌐 Servidor escuchando en puerto {port}")
-    print("=" * 60)
-    
+    print(f"🌐 Ejecutando con Flask dev server en puerto {port}")
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
